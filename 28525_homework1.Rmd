@@ -1,0 +1,242 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Data analysis and visualisation for Pinus Pinaster
+
+
+```{r}
+install.packages("readxl") # CRAN version
+install.packages("tidyverse") # CRAN version
+```
+
+
+
+```{r}
+library(readxl)
+data <- read_excel("Homework1_data.xlsx", sheet = "28525")
+data
+```
+
+A) make an initial descriptive analysis for variables diameter (d) and total height (h)
+
+```{r}
+print('Diameter in cm')
+summary(data$d_cm)
+
+print('Height in metre')
+summary(data$h_m)
+```
+
+A) statistical measures for location (per plot?) and (statistical) dispersion.
+
+```{r}
+for (plot in unique(data$Plot)) {
+  print(paste('Plot:', plot))
+  print('Diameter in cm')
+  print(summary(data[dat$Plot == plot, ]$d_cm))
+ 
+  print('Height in metre')
+  print(summary(data[dat$Plot == plot, ]$h_m))
+}
+```
+
+make new dataframe with dispersion measures for each plot, to display nicely
+
+```{r}
+library(tidyverse)
+
+# Calculate summary statistics for each plot
+summary_df <- data %>%
+  group_by(Plot) %>%
+  summarise(
+    # Diameter statistics
+    Diameter_mean = mean(d_cm, na.rm = TRUE),
+    Diameter_sd = sd(d_cm, na.rm = TRUE),
+    Diameter_var = var(d_cm, na.rm = TRUE),
+    Diameter_min = min(d_cm, na.rm = TRUE),
+    Diameter_max = max(d_cm, na.rm = TRUE),
+    
+    # Height statistics
+    Height_mean = mean(h_m, na.rm = TRUE),
+    Height_sd = sd(h_m, na.rm = TRUE),
+    Height_var = var(h_m, na.rm = TRUE),
+    Height_min = min(h_m, na.rm = TRUE),
+    Height_max = max(h_m, na.rm = TRUE),
+  )
+
+# View the resulting summary data frame
+print(summary_df)
+
+```
+
+
+
+B) hypsometric relationship between diameter and total height. 
+
+```{r}
+plot(data$d_cm, data$h_m, xlab = 'Diameter (cm)', ylab = 'Height (m)')
+lines(lowess(data$d_cm, data$h_m), col = 'red')
+```
+lowess overfits the line to the data, as can be seen that it is 'wobbly'. I have included it to give a better indication of if a pattern seems present in the data. 
+
+
+B) same as above, but for each plot
+
+```{r}
+for (plot in unique(data$Plot)) {
+  print(paste('Plot:', plot))
+  plot(data[data$Plot == plot, ]$d_cm, data[data$Plot == plot, ]$h_m, xlab = 'Diameter (cm)', ylab = 'Height (m)')
+  lines(lowess(data[data$Plot == plot, ]$d_cm, data[data$Plot == plot, ]$h_m), col = 'red')
+  title(paste('Plot:', plot))
+}
+```
+
+
+C) fit model from Paulo et al. to this data. 
+I chose model 11, as it was one of the models chosen to use for the data in the article. It's formula is 1.3 + du/(alpha+beta*du). alpha is related to the growth rate, and beta is related to the upper asymptote.  
+
+Fit the model:
+```{r}
+model_fit <- nls(h_m ~ 1.3 + d_cm / (alpha + beta * d_cm),
+                 data = data,
+                 start = list(alpha = 1, beta = 0.01),
+                 control = nls.control(maxiter = 100))
+
+
+```
+
+```{r}
+summary(model_fit)
+```
+
+
+
+
+D) Add the estimates of the fitted model to the graph created in B.
+
+```{r}
+# Get the parameter estimates
+alpha_est <- coef(model_fit)["alpha"]
+beta_est <- coef(model_fit)["beta"]
+
+# Create a sequence of d_cm values for the fitted line
+d_cm_seq <- seq(min(data$d_cm), max(data$d_cm), length.out = 100)
+
+# Calculate the predicted h_m values
+h_m_pred <- 1.3 + d_cm_seq / (alpha_est + beta_est * d_cm_seq)
+
+# Create a data frame for the predicted values
+fitted_data <- data.frame(d_cm = d_cm_seq, h_m = h_m_pred)
+```
+
+Plot:
+```{r}
+library(ggplot2)
+# Create the plot
+ggplot(data, aes(x = d_cm, y = h_m)) +
+  geom_point() +  # Scatter plot of the original data
+  geom_line(data = fitted_data, aes(x = d_cm, y = h_m), color = "red") +  # Add the fitted line
+  labs(x = "Diameter (cm)", y = "Height (m)", title = "Height-Diameter Relationship with Fitted Model") + theme_bw()
+```
+```{r}
+# Predicted heights
+predicted_heights <- predict(model_fit)
+
+# Residuals
+residuals <- data$h_m - predicted_heights
+
+# R-squared calculation
+ss_res <- sum(residuals^2)
+ss_tot <- sum((data$h_m - mean(data$h_m))^2)
+r_squared <- 1 - (ss_res / ss_tot)
+
+cat("R-squared:", r_squared)
+```
+
+
+E) Check and discuss the model assumptions of the model fitted in B. 
+The model is non-linear. Looking at our data, we could assume that a linear model might also perform well, however we know from our knowledge of trees that a the height and diameter of a tree will not increase forever, nor will they continue growing with the same constant rate. The non-linear model should reflect this, and is more appropriate. This leads into another assumption, that this model's form accuratly describes the relationship between height and diameter. This model approaches an asymptote as height increases. By viewing a plot of the residuals against the diameter we can see that a majority of the datapoints were within 5m of their predicted height values (where residuals == 0). While that could be better, the diameters where this was the case had a large range. 
+
+```{r}
+plot(data$d_cm, residuals, xlab = 'Diameter (cm)', ylab = 'Residuals')
+lines(c(min(data$d_cm), max(data$d_cm)), c(0, 0), col = 'red')
+```
+
+Another assumption is that the errors are independent of one another. i.e. that the error of one tree's height prediction is not related to the error of another tree's height prediction. This likely does not hold true for our plot's, as the trees compete and provide benefits to one another, and so the height of one tree will often generally affect the height of nearby trees.
+
+One more assumption is that the residuals are normally distributed. The plot below of the residuals appears to be normally distributed. This can also be tested with a Shapiro-Wilk test, which is a test of normality.
+
+```{r}
+hist(residuals, xlab = 'Residuals', main = 'Histogram of Residuals')
+```
+
+```{r}
+shapiro.test(residuals)
+```
+If we decide on a significance level of 0.05, then we cannot reject the hypothesis that the residuals are normally distributed, and therefore we can say that the residuals are normally distributed.
+
+The last two assumptions are that of homoescedasticity, and no multicollinearity. In the plot of the residuals against the diameter, the residuals are much more distributed across the 20-30cm range, and so it does not appear to meet the homoscedasticity assumption. No multicollinearity is the assumption that the independent variables are not highly correlated. This is not an issue in this model, as there is only one independent variable, diameter.
+
+
+F) Based on literature review, use a tree-level model to estimate tree biomass to calculate the biomass per hectare of this data
+
+My data is for Pinus Pinaster. I searched for a model using the keywords 'Pinus Pinaster', "tree-level model', 'biomass'. Most research was from Mediterranean regions, both in Europe and Australia. I noticed that ISA had a lot of related links, however the ISA website wasn't loading for me the day I completed this question. I have used the model from the article 'Generalized biomass equations for the main aboveground biomass components of maritime pine across contrasting environments' by Shaiek et. al (2011) The model was extended to include total tree height, and tree age, however as we do not have tree age, I will use the model that only includes diameter and height.
+
+In order to give an even weight to every plot sampled, each observation was weighted by 1/n, where n is the number of trees sampled. For normalising the error distribution,  a form was used that multiplyies the two sides of the equation by Dj^(−2)  as follows:
+
+Wij * Dj^-2 = (ai *Dj^(bi) + eij)*Dj^-2
+
+where W ij is the biomass of compartment i of tree j (kilograms per tree), ai and bi are model parameters to fit by non-linear regression, Dj the diameter at breast height (meter) and eij the error term
+
+As we want the biomass per hectare, we will sum the biomass of all trees in a plot, and then multiply by the number of plots per hectare. The plot size is 500m^2, so the value of the formula will be multiplied by 20 to get the biomass per hectare. 
+
+As we want the Wij, the constant does not make a lot of sense, as to remove it from the left hand side, it will also be removed from the right hand side. So the formula will be without that constant:
+Wij = ai *Dj^(bi) + eij
+
+I will use the alpha of 1.437588 and beta of 0.019397, from the model fit.
+I have made an assumption that the error is the residual standard error, and so have used this from the model fit, as 3.309
+
+```{r}
+# for each tree, calculate the biomass
+model_biomass = function(d_cm, a=1.437588, b=0.019397, e=3.309) {
+  return(a * d_cm^b + e)
+}
+data$biomass <- model_biomass(d_cm = data$d_cm)
+
+```
+
+Now we can see that there is a new column in the data, 'biomass', which is the biomass of the tree. 
+
+```{r}
+data
+```
+
+Now let's calculate the biomass per hectare, by summing the biomass per plot, and then multiplying by 20 (as each plot is 500m^2).
+
+```{r}
+library("tidyverse")
+
+biomass_per_hectare <- data %>%
+  group_by(Plot) %>%
+  summarise(biomass_per_hectare = sum(biomass)*20) 
+```
+
+Now we can show the biomass per hectare for each plot:
+```{r}
+biomass_per_hectare
+```
+
+References: 
+Paulo JA, Tomé J, Tomé M (2011) Nonlinear fixed and random generalized height-diameter models for
+Portuguese cork oak stands. Annals of Forest Science 68: 295 – 309. doi: http://dx.doi.org/10.1007/s13595-011-0041-y
+
+Shaiek O, Loustou D, Tricket P, Meredieu C, Bachtobbi B, Garchi S, Aouni MHEL (2011) 
+Generalized biomass equations for the main aboveground biomass components of maritime pine across contrasting environments. Annals of Forest Science 68: 443-452
+
+
+
+
+
+
